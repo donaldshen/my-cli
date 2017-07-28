@@ -1,0 +1,153 @@
+#!/usr/bin/env node
+
+const program = require('commander')
+const chalk = require('chalk')
+const path = require('path')
+const homedir = require('os').homedir()
+// Convert an absolute path to a tilde path: /Users/sindresorhus/dev → ~/dev
+const tildify = require('tildify')
+const exists = require('fs').existsSync
+const inquirer = require('inquirer')
+const rm = require('rimraf').sync
+const ora = require('ora')
+const download = require('download-git-repo')
+const generate = require('../lib/generate')
+const logger = require('../lib/logger')
+
+/**
+* Usage.
+*/
+
+program
+  .usage('<template-name> [project-name]')
+  .option('--offline', 'use cached template')
+
+/**
+* Help.
+*/
+
+program.on('--help', () => {
+  console.log('  Examples:')
+  console.log()
+  const indent = '    '
+  console.log(chalk.gray(`${indent}# create a new project with an local template`))
+  console.log(`${indent}$ my init template my-project`)
+  console.log()
+  console.log(chalk.gray(`${indent}# create a new project straight from a github template`))
+  console.log(`${indent}$ my init username/repo my-project`)
+  console.log()
+})
+
+program.parse(process.argv)
+if (program.args.length < 1) {
+  // Output help information and exit.
+  program.help()
+}
+
+/**
+* Settings.
+*/
+
+let meta = (function () {
+  let template, name, src, dest, inPlace
+
+  const cache = path.join(homedir, '.my-templates')
+  template = program.args[0]
+  // template from github repo
+  if (template.includes('/')) {
+    src = path.join(cache, template.replace(/\//g, '-'))
+    if (program.offline) {
+      console.log(`> Use cached template at ${chalk.yellow(tildify(src))}`)
+    }
+  } else {
+    src = path.join(cache, template)
+  }
+
+  name = program.args[1]
+  inPlace = !name || name === '.'
+  if (inPlace) {
+    // name of the current folder
+    name = path.relative('../', process.cwd())
+    dest = path.resolve('.')
+  } else {
+    dest = path.resolve(name)
+  }
+
+  return {
+    template,
+    name,
+    src,
+    dest,
+    inPlace
+  }
+}())
+
+/**
+* Padding.
+*/
+
+console.log()
+process.on('exit', () => {
+  console.log()
+})
+
+;(async function () {
+  if (exists(meta.dest)) {
+    const answers = await inquirer.prompt([{
+      type: 'confirm',
+      message: meta.inPlace
+        ? 'Generate project in current directory?'
+        : 'Target directory exists. Continue?',
+      name: 'ok'
+    }])
+    if (!answers.ok) {
+      process.exit(0)
+    }
+  }
+  run(meta)
+}())
+
+/**
+* Check, download and generate the project.
+*/
+
+async function run ({
+  template,
+  name,
+  src,
+  dest
+}) {
+  const online = meta.template.includes('/') && !program.offline
+
+  try {
+    if (online) {
+      await tryDownload({src, template})
+    } else if (!exists(src)) {
+      // logger.fatal('Local template "%s" not found.', src)
+      throw new Error(`Local template "${src}" not found.`)
+    }
+    const msg = await generate({name, src, dest})
+    logger.success(msg)
+  } catch (err) {
+    logger.fatal(err)
+  }
+}
+
+function tryDownload ({src, template}) {
+  const spinner = ora('downloading template')
+  spinner.start()
+  // Remove if local template exists
+  if (exists(src)) {
+    rm(src)
+  }
+  return new Promise((resolve, reject) => {
+    download(template, src, {}, (err) => {
+      spinner.stop()
+      if (err) {
+        reject(new Error(`Failed to download repo ${template}: ${err.message.trim()}`))
+      } else {
+        resolve('Download success')
+      }
+    })
+  })
+}
