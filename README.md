@@ -9,6 +9,7 @@ Prerequisites: [Node.js](https://nodejs.org/en/) (>=8.x), npm version 3+ and [Gi
 
 ``` bash
 $ git clone https://github.com/donaldshen/my-cli.git
+$ cd my-cli
 $ npm install
 $ npm link
 ```
